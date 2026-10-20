@@ -1,0 +1,5 @@
+pillow>=10.0
+requests>=2.31
+playwright>=1.45
+# terms.json을 다시 만들 때만 필요
+# pdfplumber>=0.11

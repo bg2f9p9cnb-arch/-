@@ -1,0 +1,87 @@
+name: daily-cardnews
+
+on:
+  schedule:
+    # GitHub 예약 실행은 늦게 시작될 때가 많아서, 미리 시작해 카드를 만들어 두고 9시 정각에 게시해요.
+    - cron: "17 23 * * *"   # 한국시간 08:17 시작 -> 09:00 게시
+    - cron: "47 0 * * *"    # 한국시간 09:47 예비 실행 (아침 실행이 빠졌거나 실패했을 때만 게시)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "게시하지 않고 미리보기만 만들기"
+        type: boolean
+        default: false
+      check_token:
+        description: "인스타 토큰 확인만 하기"
+        type: boolean
+        default: false
+      term:
+        description: "특정 용어로 게시 (비우면 순서대로)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-cardnews
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 이모지 폰트 설치
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-color-emoji
+
+      - run: pip install -r requirements.txt
+
+      - name: 카드 렌더링용 브라우저 설치
+        run: python -m playwright install --with-deps chromium
+
+      - name: 인스타 토큰 자동 갱신 (매월 1일, 15일)
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          D=$(TZ=Asia/Seoul date +%d)
+          if [ -n "$GH_TOKEN" ] && { [ "$D" = "01" ] || [ "$D" = "15" ]; }; then
+            NEW=$(python refresh_token.py)
+            echo "::add-mask::$NEW"
+            gh secret set IG_ACCESS_TOKEN --body "$NEW" --repo "${{ github.repository }}"
+            echo "토큰을 갱신했어요."
+          else
+            echo "오늘은 토큰 갱신 날이 아니에요."
+          fi
+
+      - name: 카드뉴스 만들고 게시
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_HANDLE: ${{ vars.IG_HANDLE }}
+          PROFILE_NAME: ${{ vars.PROFILE_NAME }}
+        run: |
+          ARGS=""
+          # 예약 실행일 때만 9시 정각까지 기다림 (수동 실행은 바로 게시)
+          if [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--publish-at 09:00"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "${{ inputs.check_token }}" = "true" ]; then ARGS="--check-token"; fi
+          if [ -n "${{ inputs.term }}" ]; then ARGS="$ARGS --term ${{ inputs.term }}"; fi
+          python run_daily.py $ARGS
+
+      - name: 미리보기 이미지 보관
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview
+          path: output/
