@@ -179,4 +179,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:  # 실패 원인을 GitHub 화면(주석)에 남긴다
+        msg = str(e).replace("\n", " ")[:1500]
+        print(f"::error title=카드뉴스 실패::{type(e).__name__}: {msg}")
+        raise
