@@ -60,6 +60,13 @@ class InstagramPublisher:
             time.sleep(5)
         raise InstagramError(f"컨테이너 {container_id} 처리 시간 초과")
 
+    def publish_story(self, image_url):
+        """이미지 한 장을 스토리로 올린다."""
+        self.wait_for_url(image_url)
+        cid = self._request("POST", f"{self.user_id}/media", image_url=image_url, media_type="STORIES")["id"]
+        self._wait_container(cid)
+        return self._request("POST", f"{self.user_id}/media_publish", creation_id=cid)["id"]
+
     def publish_carousel(self, image_urls, caption):
         if not 2 <= len(image_urls) <= 10:
             raise ValueError("캐러셀은 2~10장이어야 해요")

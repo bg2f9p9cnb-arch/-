@@ -243,3 +243,43 @@ def render_cards(card, number, out_dir):
         browser.close()
     (out_dir / "_background.jpg").unlink(missing_ok=True)
     return paths
+
+
+def make_story(cover_path, out_path):
+    """표지 카드로 인스타 스토리용 세로 이미지(1080x1920)를 만든다."""
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+    SW, SH = 1080, 1920
+    cover = Image.open(cover_path).convert("RGB")
+    bg = cover.resize((SW, round(cover.height * SW / cover.width * 1.45)))
+    bg = bg.crop((0, (bg.height - SH) // 2, SW, (bg.height - SH) // 2 + SH)) if bg.height >= SH else bg.resize((SW, SH))
+    bg = bg.filter(ImageFilter.GaussianBlur(40))
+    bg = Image.blend(bg, Image.new("RGB", (SW, SH), "#000000"), 0.35)
+
+    card_w = 900
+    card = cover.resize((card_w, round(cover.height * card_w / cover.width)), Image.LANCZOS)
+    x, y = (SW - card_w) // 2, 330
+    shadow = Image.new("RGBA", (SW, SH), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle((x + 10, y + 18, x + card_w + 10, y + card.height + 18), 36, fill=(0, 0, 0, 120))
+    bg = Image.alpha_composite(bg.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(18)))
+    mask = Image.new("L", card.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, card.width, card.height), 36, fill=255)
+    bg.paste(card, (x, y), mask)
+
+    d = ImageDraw.Draw(bg)
+    bold = ImageFont.truetype(str(FONTS / "Pretendard-Bold.otf"), 56)
+    reg = ImageFont.truetype(str(FONTS / "Pretendard-Regular.otf"), 40)
+
+    def center(text, font, top, fill):
+        w = d.textlength(text, font=font)
+        d.text(((SW - w) / 2, top), text, font=font, fill=fill)
+
+    center("새 카드뉴스 업로드!", bold, 170, "#ffffff")
+    by = y + card.height + 80
+    label = "피드에서 전체 보기  →"
+    lw = d.textlength(label, font=reg)
+    d.rounded_rectangle(((SW - lw) / 2 - 44, by, (SW + lw) / 2 + 44, by + 96), 48, fill="#ffffff")
+    d.text(((SW - lw) / 2, by + 24), label, font=reg, fill="#000000")
+    center(HANDLE, reg, by + 150, "#ffffff")
+    bg.convert("RGB").save(out_path, "JPEG", quality=92)
+    return Path(out_path)

@@ -19,7 +19,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import content
-from render import render_cards
+from render import make_story, render_cards
 
 ROOT = Path(__file__).parent
 OUTPUT = ROOT / "output"
@@ -152,6 +152,8 @@ def main():
         data = json.loads(saved.read_text(encoding="utf-8"))
         term, card, caption = data["term"], data["card"], data["caption"]
         paths = sorted(out_dir.glob("slide_*.jpg"))
+        if not (out_dir / "story.jpg").exists():
+            make_story(paths[0], out_dir / "story.jpg")
         number = data.get("number", state.get("posted", 0) + 1)
         print("오늘 만들어 둔 카드를 다시 사용해요.")
     else:
@@ -160,6 +162,7 @@ def main():
         number = state.get("posted", 0) + 1 + len(other)
         caption = content.build_caption(card, number)
         paths = render_cards(card, number, out_dir)
+        make_story(paths[0], out_dir / "story.jpg")
         saved.write_text(
             json.dumps({"term": term, "card": card, "caption": caption, "number": number},
                        ensure_ascii=False, indent=1),
@@ -183,6 +186,15 @@ def main():
 
     media_id = InstagramPublisher().publish_carousel(image_urls(out_dir.name, len(paths)), caption)
     print(f"게시 완료! media id = {media_id}")
+
+    # 스토리에도 공유 (실패해도 피드 게시는 유지)
+    try:
+        base = image_urls(out_dir.name, 1)[0].rsplit("/", 1)[0]
+        story_id = InstagramPublisher().publish_story(f"{base}/story.jpg")
+        (out_dir / "story.txt").write_text(f"{story_id}\n", encoding="utf-8")
+        print(f"스토리 공유 완료! story id = {story_id}")
+    except Exception as e:  # noqa: BLE001
+        print(f"::warning title=스토리 공유 실패::{type(e).__name__}: {str(e)[:500]}")
 
     # 게시에 성공했을 때만 '사용한 용어'로 기록
     if term["id"] not in state["used"]:
