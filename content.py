@@ -84,10 +84,11 @@ def load_bank():
     return []
 
 
-def next_bank_card(state, terms, term_id=None, term_name=None):
-    """미리 써둔 문구 중 아직 안 쓴 것을 순서대로 하나 꺼낸다. 없으면 None."""
+def next_bank_card(state, terms, term_id=None, term_name=None, exclude=()):
+    """미리 써둔 문구 중 아직 안 쓴 것을 순서대로 하나 꺼낸다. 없으면 None.
+    exclude: 같은 날 다른 시간대에 이미 만들어 두고 아직 못 올린 용어 (중복 방지)"""
     by_id = {t["id"]: t for t in terms}
-    used = set(state["used"])
+    used = set(state["used"]) | set(exclude)
     for entry in load_bank():
         tid = entry["term_id"]
         term = by_id.get(tid)

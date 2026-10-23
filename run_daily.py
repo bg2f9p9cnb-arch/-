@@ -23,7 +23,8 @@ from render import render_cards
 
 ROOT = Path(__file__).parent
 OUTPUT = ROOT / "output"
-KEEP_DAYS = 14  # 저장소 용량 관리: 최근 N일치 이미지만 남김
+KEEP_DAYS = 28  # 저장소 용량 관리: 최근 N개 게시물 폴더만 남김 (하루 2개 = 2주)
+SLOTS = {"am": "09:00", "pm": "19:00"}  # 하루 2회 게시 시간 (한국시간)
 
 
 def sh(*cmd, check=True):
@@ -73,7 +74,23 @@ def wait_until(hhmm):
         time.sleep(secs)
 
 
-def choose_card(state, terms, args):
+def slot_dir(today, slot):
+    # 오전은 기존과 같은 폴더 이름(날짜), 저녁은 '날짜-pm'
+    return OUTPUT / (today if slot == "am" else f"{today}-{slot}")
+
+
+def pending_today(today, current_dir):
+    """같은 날 다른 시간대에 만들어 두고 아직 못 올린 카드의 용어 번호와 개수"""
+    ids = []
+    for d in OUTPUT.glob(f"{today}*"):
+        if d == current_dir or not d.is_dir():
+            continue
+        if (d / "content.json").exists() and not (d / "posted.txt").exists():
+            ids.append(json.loads((d / "content.json").read_text(encoding="utf-8"))["term"]["id"])
+    return ids
+
+
+def choose_card(state, terms, args, exclude=()):
     """오늘의 용어와 카드 문구를 정한다.
 
     - 미리 써둔 문구(content_bank.json)가 있으면 API 없이 그걸 순서대로 사용 (무료)
@@ -83,7 +100,7 @@ def choose_card(state, terms, args):
         term = content.pick_term(state, terms, args.id, args.term)
         return term, content.mock_card_text(term)
 
-    banked = content.next_bank_card(state, terms, args.id, args.term)
+    banked = content.next_bank_card(state, terms, args.id, args.term, exclude=exclude)
     if banked:
         return banked
     if not os.getenv("ANTHROPIC_API_KEY"):
@@ -110,6 +127,7 @@ def main():
     ap.add_argument("--id", type=int, help="용어 번호로 직접 지정")
     ap.add_argument("--publish-at", help="이 시각(한국시간 HH:MM)까지 기다렸다가 게시. 이미 지났으면 바로 게시")
     ap.add_argument("--check-token", action="store_true", help="인스타 토큰이 제대로 되는지만 확인")
+    ap.add_argument("--slot", choices=list(SLOTS), default="am", help="오전(am) / 저녁(pm) 게시분")
     args = ap.parse_args()
 
     if args.check_token:
@@ -122,9 +140,10 @@ def main():
     terms = content.load_terms()
     state = content.load_state()
 
-    out_dir = OUTPUT / today
+    out_dir = slot_dir(today, args.slot)
+    label = f"{today} {args.slot}"
     if (out_dir / "posted.txt").exists() and not args.dry_run:
-        print("오늘은 이미 게시했어요. 종료합니다.")
+        print(f"{label} 게시분은 이미 올렸어요. 종료합니다.")
         return
 
     saved = out_dir / "content.json"
@@ -136,15 +155,16 @@ def main():
         number = data.get("number", state.get("posted", 0) + 1)
         print("오늘 만들어 둔 카드를 다시 사용해요.")
     else:
-        term, card = choose_card(state, terms, args)
-        number = state.get("posted", 0) + 1
+        other = pending_today(today, out_dir)
+        term, card = choose_card(state, terms, args, exclude=other)
+        number = state.get("posted", 0) + 1 + len(other)
         caption = content.build_caption(card, number)
         paths = render_cards(card, number, out_dir)
         saved.write_text(
             json.dumps({"term": term, "card": card, "caption": caption, "number": number},
                        ensure_ascii=False, indent=1),
             encoding="utf-8")
-    print(f"[{today}] 오늘의 용어: {term['term']} -> {out_dir}")
+    print(f"[{label}] 오늘의 용어: {term['term']} -> {out_dir}")
     print("-" * 40 + f"\n{caption}\n" + "-" * 40)
 
     if args.dry_run:
@@ -156,18 +176,18 @@ def main():
     # 이미지를 공개 저장소에 커밋해서 raw URL로 열리게 한다
     if not os.getenv("IMAGE_BASE_URL"):
         content.save_state(state)  # 건너뛴 용어 기록도 함께 저장
-        git_push(f"cardnews {today}: {term['term']}")
+        git_push(f"cardnews {label}: {term['term']}")
 
     if args.publish_at:
         wait_until(args.publish_at)
 
-    media_id = InstagramPublisher().publish_carousel(image_urls(today, len(paths)), caption)
+    media_id = InstagramPublisher().publish_carousel(image_urls(out_dir.name, len(paths)), caption)
     print(f"게시 완료! media id = {media_id}")
 
     # 게시에 성공했을 때만 '사용한 용어'로 기록
     if term["id"] not in state["used"]:
         state["used"].append(term["id"])
-    state["posted"] = number
+    state["posted"] = max(state.get("posted", 0), number)
     content.save_state(state)
     (out_dir / "posted.txt").write_text(f"{media_id}\n", encoding="utf-8")
     cleanup_old()
@@ -175,7 +195,7 @@ def main():
     if left <= 7 and not os.getenv("ANTHROPIC_API_KEY"):
         print(f"::warning::미리 써둔 카드 문구가 {left}개 남았어요. Claude에게 더 채워달라고 하세요.")
     if not os.getenv("NO_GIT"):
-        git_push(f"posted {today}: {term['term']}")
+        git_push(f"posted {label}: {term['term']}")
 
 
 if __name__ == "__main__":

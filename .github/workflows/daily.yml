@@ -2,13 +2,15 @@ name: daily-cardnews
 
 on:
   schedule:
-    # GitHub 예약 실행은 늦게 시작될 때가 많아서, 미리 시작해 카드를 만들어 두고 9시 정각에 게시해요.
-    - cron: "17 23 * * *"   # 한국시간 08:17 시작 -> 09:00 게시
-    # 예비 실행: 아침 실행이 빠졌거나 실패했을 때만 게시 (이미 올렸으면 바로 종료)
-    - cron: "47 0 * * *"    # 한국시간 09:47
-    - cron: "47 2 * * *"    # 한국시간 11:47
-    - cron: "47 4 * * *"    # 한국시간 13:47
-    - cron: "47 8 * * *"    # 한국시간 17:47
+    # 하루 2회: 오전 9시, 저녁 7시 (한국시간). 미리 시작해 카드를 만들어 두고 정각에 게시해요.
+    # 예비 실행은 앞선 실행이 실패했을 때만 게시하고, 이미 올렸으면 바로 끝나요.
+    - cron: "17 23 * * *"   # 오전분 08:17 시작 -> 09:00 게시
+    - cron: "47 0 * * *"    # 오전분 예비 09:47
+    - cron: "47 2 * * *"    # 오전분 예비 11:47
+    - cron: "47 4 * * *"    # 오전분 예비 13:47
+    - cron: "17 9 * * *"    # 저녁분 18:17 시작 -> 19:00 게시
+    - cron: "47 10 * * *"   # 저녁분 예비 19:47
+    - cron: "47 12 * * *"   # 저녁분 예비 21:47
   workflow_dispatch:
     inputs:
       dry_run:
@@ -22,6 +24,11 @@ on:
       term:
         description: "특정 용어로 게시 (비우면 순서대로)"
         required: false
+      slot:
+        description: "어느 게시분인지 (am=오전, pm=저녁)"
+        type: choice
+        options: [am, pm]
+        default: am
 
 permissions:
   contents: write
@@ -76,8 +83,15 @@ jobs:
           PROFILE_NAME: ${{ vars.PROFILE_NAME }}
         run: |
           ARGS=""
-          # 예약 실행일 때만 9시 정각까지 기다림 (수동 실행은 바로 게시)
-          if [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--publish-at 09:00"; fi
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # 예약 실행: 시작 시각으로 오전/저녁분을 정하고, 게시 시각까지 기다림
+            case "${{ github.event.schedule }}" in
+              "17 9 * * *"|"47 10 * * *"|"47 12 * * *") ARGS="--slot pm --publish-at 19:00" ;;
+              *) ARGS="--slot am --publish-at 09:00" ;;
+            esac
+          else
+            ARGS="--slot ${{ inputs.slot || 'am' }}"
+          fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           if [ "${{ inputs.check_token }}" = "true" ]; then ARGS="--check-token"; fi
           if [ -n "${{ inputs.term }}" ]; then ARGS="$ARGS --term ${{ inputs.term }}"; fi
