@@ -21,6 +21,10 @@ on:
         description: "인스타 토큰 확인만 하기"
         type: boolean
         default: false
+      stats:
+        description: "게시물 성과만 확인하기"
+        type: boolean
+        default: false
       term:
         description: "특정 용어로 게시 (비우면 순서대로)"
         required: false
@@ -94,6 +98,7 @@ jobs:
           fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           if [ "${{ inputs.check_token }}" = "true" ]; then ARGS="--check-token"; fi
+          if [ "${{ inputs.stats }}" = "true" ]; then python stats.py; exit 0; fi
           if [ -n "${{ inputs.term }}" ]; then ARGS="$ARGS --term ${{ inputs.term }}"; fi
           python run_daily.py $ARGS
 
